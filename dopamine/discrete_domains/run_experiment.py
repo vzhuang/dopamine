@@ -35,6 +35,8 @@ import tensorflow.compat.v1 as tf
 
 import gin.tf
 
+from scipy.stats import levy_stable
+
 
 def load_gin_configs(gin_files, gin_bindings):
   """Loads gin configuration files.
@@ -280,6 +282,7 @@ class Runner(object):
     """
     step_number = 0
     total_reward = 0.
+    total_actual_reward = 0.
 
     action = self._initialize_episode()
     is_terminal = False
@@ -288,11 +291,15 @@ class Runner(object):
     while True:
       observation, reward, is_terminal = self._run_one_step(action)
 
+      actual_reward = reward
+      #reward = levy_stable.rvs(1.1, 0., loc=reward, size=1)[0]
+
       total_reward += reward
+      total_actual_reward += actual_reward
       step_number += 1
 
       # Perform reward clipping.
-      reward = np.clip(reward, -1, 1)
+      # reward = np.clip(reward, -1, 1)
 
       if (self._environment.game_over or
           step_number == self._max_steps_per_episode):
@@ -308,7 +315,7 @@ class Runner(object):
 
     self._end_episode(reward)
 
-    return step_number, total_reward
+    return step_number, total_reward, total_actual_reward
 
   def _run_one_phase(self, min_steps, statistics, run_mode_str):
     """Runs the agent/environment loop until a desired number of steps.
@@ -329,23 +336,29 @@ class Runner(object):
     step_count = 0
     num_episodes = 0
     sum_returns = 0.
+    sum_actual_returns = 0.
 
     while step_count < min_steps:
-      episode_length, episode_return = self._run_one_episode()
+      episode_length, episode_return, episode_actual_return = self._run_one_episode()
+      sys.stdout.write('run_mode_str %s' % run_mode_str)
       statistics.append({
           '{}_episode_lengths'.format(run_mode_str): episode_length,
-          '{}_episode_returns'.format(run_mode_str): episode_return
+          '{}_episode_returns'.format(run_mode_str): episode_return,
+          '{}_episode_actual_returns'.format(run_mode_str): episode_actual_return
       })
       step_count += episode_length
       sum_returns += episode_return
+      sum_actual_returns += episode_actual_return
       num_episodes += 1
       # We use sys.stdout.write instead of tf.logging so as to flush frequently
       # without generating a line break.
       sys.stdout.write('Steps executed: {} '.format(step_count) +
                        'Episode length: {} '.format(episode_length) +
-                       'Return: {}\r'.format(episode_return))
+                       'Return: {} '.format(episode_return) +
+                       'Actual return: {}\r'.format(episode_actual_return)
+      )
       sys.stdout.flush()
-    return step_count, sum_returns, num_episodes
+    return step_count, sum_returns, num_episodes, sum_actual_returns
 
   def _run_train_phase(self, statistics):
     """Run training phase.
@@ -361,13 +374,17 @@ class Runner(object):
     # Perform the training phase, during which the agent learns.
     self._agent.eval_mode = False
     start_time = time.time()
-    number_steps, sum_returns, num_episodes = self._run_one_phase(
+    number_steps, sum_returns, num_episodes, sum_actual_returns = self._run_one_phase(
         self._training_steps, statistics, 'train')
     average_return = sum_returns / num_episodes if num_episodes > 0 else 0.0
+    average_actual_return = sum_actual_returns / num_episodes if num_episodes > 0 else 0.0
     statistics.append({'train_average_return': average_return})
+    statistics.append({'train_average_actual_return': average_actual_return})
     time_delta = time.time() - start_time
     tf.logging.info('Average undiscounted return per training episode: %.2f',
                     average_return)
+    tf.logging.info('Average actual undiscounted return per training episode: %.2f',
+                    average_actual_return)
     tf.logging.info('Average training steps per second: %.2f',
                     number_steps / time_delta)
     return num_episodes, average_return
@@ -385,7 +402,7 @@ class Runner(object):
     """
     # Perform the evaluation phase -- no learning.
     self._agent.eval_mode = True
-    _, sum_returns, num_episodes = self._run_one_phase(
+    _, sum_returns, num_episodes, sum_actual_returns = self._run_one_phase(
         self._evaluation_steps, statistics, 'eval')
     average_return = sum_returns / num_episodes if num_episodes > 0 else 0.0
     tf.logging.info('Average undiscounted return per evaluation episode: %.2f',
@@ -538,4 +555,5 @@ class TrainRunner(Runner):
         tf.Summary.Value(
             tag='Train/AverageReturns', simple_value=average_reward),
     ])
+
     self._summary_writer.add_summary(summary, iteration)

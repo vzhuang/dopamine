@@ -40,10 +40,15 @@ from tensorflow.contrib import layers as contrib_layers
 from tensorflow.contrib import slim as contrib_slim
 
 
+MOUNTAINCAR_MIN_VALS = np.array([-1.2, -0.07])
+MOUNTAINCAR_MAX_VALS = np.array([0.6, 0.07])
 CARTPOLE_MIN_VALS = np.array([-2.4, -5., -math.pi/12., -math.pi*2.])
 CARTPOLE_MAX_VALS = np.array([2.4, 5., math.pi/12., math.pi*2.])
 ACROBOT_MIN_VALS = np.array([-1., -1., -1., -1., -5., -5.])
 ACROBOT_MAX_VALS = np.array([1., 1., 1., 1., 5., 5.])
+gin.constant('gym_lib.MOUNTAINCAR_OBSERVATION_SHAPE', (2, 1))
+gin.constant('gym_lib.MOUNTAINCAR_OBSERVATION_DTYPE', tf.float64)
+gin.constant('gym_lib.MOUNTAINCAR_STACK_SIZE', 1)
 gin.constant('gym_lib.CARTPOLE_OBSERVATION_SHAPE', (4, 1))
 gin.constant('gym_lib.CARTPOLE_OBSERVATION_DTYPE', tf.float64)
 gin.constant('gym_lib.CARTPOLE_STACK_SIZE', 1)
@@ -100,8 +105,9 @@ class BasicDiscreteDomainNetwork(tf.keras.layers.Layer):
     super(BasicDiscreteDomainNetwork, self).__init__(name=name)
     self.num_actions = num_actions
     self.num_atoms = num_atoms
-    self.min_vals = min_vals
-    self.max_vals = max_vals
+    # self.min_vals = min_vals
+    # self.max_vals = max_vals
+
     # Defining layers.
     self.flatten = tf.keras.layers.Flatten()
     self.dense1 = tf.keras.layers.Dense(512, activation=activation_fn,
@@ -119,9 +125,9 @@ class BasicDiscreteDomainNetwork(tf.keras.layers.Layer):
     """Creates the output tensor/op given the state tensor as input."""
     x = tf.cast(state, tf.float32)
     x = self.flatten(x)
-    x -= self.min_vals
-    x /= self.max_vals - self.min_vals
-    x = 2.0 * x - 1.0  # Rescale in range [-1, 1].
+    # x -= self.min_vals
+    # x /= self.max_vals - self.min_vals
+    # x = 2.0 * x - 1.0  # Rescale in range [-1, 1].
     x = self.dense1(x)
     x = self.dense2(x)
     x = self.last_layer(x)
@@ -159,6 +165,27 @@ def _basic_discrete_domain_network(min_vals, max_vals, num_actions, state,
     return contrib_slim.fully_connected(
         net, num_actions * num_atoms, activation_fn=None)
 
+@gin.configurable
+class MountainCarDQNNetwork(tf.keras.Model):
+  """Keras DQN network for Cartpole."""
+
+  def __init__(self, num_actions, name=None):
+    """Builds the deep network used to compute the agent's Q-values.
+
+    It rescales the input features so they lie in range [-1, 1].
+
+    Args:
+      num_actions: int, number of actions.
+      name: str, used to create scope for network parameters.
+    """
+    super(MountainCarDQNNetwork, self).__init__(name=name)
+    self.net = BasicDiscreteDomainNetwork(
+        MOUNTAINCAR_MIN_VALS, MOUNTAINCAR_MAX_VALS, num_actions)
+
+  def call(self, state):
+    """Creates the output tensor/op given the state tensor as input."""
+    x = self.net(state)
+    return atari_lib.DQNNetworkType(x)
 
 @gin.configurable
 class CartpoleDQNNetwork(tf.keras.Model):

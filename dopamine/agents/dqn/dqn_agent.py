@@ -30,6 +30,7 @@ import numpy as np
 import tensorflow.compat.v1 as tf
 
 import gin.tf
+import sys
 
 
 # These are aliases which are used by other classes.
@@ -61,6 +62,8 @@ def linearly_decaying_epsilon(decay_period, step, warmup_steps, epsilon):
   steps_left = decay_period + warmup_steps - step
   bonus = (1.0 - epsilon) * steps_left / decay_period
   bonus = np.clip(bonus, 0., 1. - epsilon)
+  if step % 1000 == 0:
+      sys.stdout.write('step %d left %d epsilon %f\n' % (step, steps_left, epsilon + bonus))
   return epsilon + bonus
 
 
